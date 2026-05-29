@@ -1,1 +1,31 @@
+name: PFAS Daily Digest
 
+on:
+  schedule:
+    # 5:00 AM Mountain Daylight Time = 11:00 AM UTC (Mar–Nov)
+    # Change to 12:00 UTC in winter (Nov–Mar) for Mountain Standard Time
+    - cron: "0 11 * * *"
+  workflow_dispatch:   # allows manual trigger from GitHub UI
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install anthropic requests
+
+      - name: Run PFAS digest
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SENDGRID_API_KEY:  ${{ secrets.SENDGRID_API_KEY }}
+          FROM_EMAIL:        ${{ secrets.FROM_EMAIL }}
+          TO_EMAIL:          ${{ secrets.TO_EMAIL }}
+        run: python pfas_digest.py
