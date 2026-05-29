@@ -29,8 +29,7 @@ def fetch_stories(client, topic):
             "You are a news research assistant. Use the web_search tool to find recent, "
             "real news stories. After searching, return ONLY raw JSON — no markdown fences, "
             "no explanation. Format exactly: "
-            '{\"stories\":[{\"headline\":\"...\",\"source\":\"...\",\"date\":\"...\","
-            '\"url\":\"...\",\"summary\":\"2-3 factual sentences\"}]}'
+            '{"stories":[{"headline":"...","source":"...","date":"...","url":"...","summary":"2-3 factual sentences"}]}'
         ),
         messages=[{
             "role": "user",
