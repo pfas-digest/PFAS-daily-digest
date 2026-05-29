@@ -17,45 +17,86 @@ TOPICS = [
     {"label": "Health Research",     "icon": "🔬",  "query": "PFAS health effects research study 2026"},
     {"label": "Litigation",          "icon": "⚖️",  "query": "PFAS lawsuit litigation settlement 2026"},
     {"label": "Remediation Tech",    "icon": "♻️",  "query": "PFAS cleanup remediation technology 2026"},
-    {"label": "Montana news",    "icon": "M",  "query": "PFAS articles news regulations Montana 2026"},
 ]
 
-# ── Fetch stories for one topic ───────────────────────────────────────────────
+# ── Fetch stories — two-step: search then extract ────────────────────────────
 def fetch_stories(client, topic):
     print(f"  Searching: {topic['label']}…")
-    response = client.messages.create(
+
+    # Step 1 — search the web and get a natural language summary
+    search_resp = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1500,
-        system=(
-            "You are a news research assistant. Use the web_search tool to find recent, "
-            "real news stories. After searching, return ONLY raw JSON — no markdown fences, "
-            "no explanation. Format exactly: "
-            '{"stories":[{"headline":"...","source":"...","date":"...","url":"...","summary":"2-3 factual sentences"}]}'
-        ),
+        max_tokens=2000,
         messages=[{
             "role": "user",
-            "content": f"Find the {MAX_STORIES} most recent news stories about: {topic['query']}"
+            "content": (
+                f"Search for the {MAX_STORIES} most recent news stories about: {topic['query']}. "
+                f"For each story provide: the full headline, source publication name, "
+                f"publication date, full URL, and a 2-3 sentence factual summary."
+            ),
         }],
         tools=[{"type": "web_search_20260209", "name": "web_search"}],
     )
 
-    for block in response.content:
+    # Collect all text from the search response
+    search_text = "\n".join(
+        block.text for block in search_resp.content if block.type == "text"
+    ).strip()
+
+    if not search_text:
+        print(f"  ⚠ No search text returned for '{topic['label']}'")
+        return []
+
+    # Step 2 — extract structured JSON from the search results (no tools)
+    extract_resp = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1500,
+        system=(
+            "You are a data extraction assistant. "
+            "Your only job is to convert news summaries into structured JSON. "
+            "Return ONLY raw JSON — no markdown fences, no preamble, no explanation."
+        ),
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Extract exactly {MAX_STORIES} news stories from the text below.\n"
+                f"Return this exact JSON structure:\n"
+                f'{{"stories":[{{"headline":"...","source":"...","date":"...","url":"...","summary":"2-3 sentences"}}]}}\n\n'
+                f"If fewer than {MAX_STORIES} stories are present, include all that are available.\n\n"
+                f"Text to extract from:\n{search_text}"
+            ),
+        }],
+    )
+
+    for block in extract_resp.content:
         if block.type == "text":
             try:
-                clean = block.text.replace("```json", "").replace("```", "").strip()
-                return json.loads(clean).get("stories", [])
-            except json.JSONDecodeError:
-                pass
+                raw = block.text.replace("```json", "").replace("```", "").strip()
+                # Find outermost JSON object in case of any stray text
+                start = raw.find("{")
+                end   = raw.rfind("}") + 1
+                if start >= 0 and end > start:
+                    data    = json.loads(raw[start:end])
+                    stories = data.get("stories", [])
+                    if stories:
+                        print(f"  ✓ {len(stories)} stories extracted for '{topic['label']}'")
+                        return stories[:MAX_STORIES]
+            except json.JSONDecodeError as e:
+                print(f"  ⚠ JSON parse error for '{topic['label']}': {e}")
+
+    print(f"  ⚠ Could not extract stories for '{topic['label']}'")
     return []
 
 # ── Build HTML email ──────────────────────────────────────────────────────────
 def build_html(sections, today):
-    story_card = """
-    <div style="margin-bottom:12px;padding:12px;background:#f8f8f6;border-left:3px solid #444;border-radius:2px">
-      <strong style="font-size:14px;display:block">{headline_link}</strong>
-      <span style="font-size:11px;color:#888">{source}{date_part}</span>
-      <p style="font-size:13px;color:#444;margin:6px 0 0;line-height:1.55">{summary}</p>
-    </div>"""
+    story_card = (
+        '<div style="margin-bottom:12px;padding:12px;background:#f8f8f6;'
+        'border-left:3px solid #444;border-radius:2px">'
+        "<strong style=\"font-size:14px;display:block\">{headline_link}</strong>"
+        "<span style=\"font-size:11px;color:#888\">{source}{date_part}</span>"
+        "<p style=\"font-size:13px;color:#444;margin:6px 0 0;line-height:1.55\">{summary}</p>"
+        "</div>"
+    )
 
     body_parts = []
     for section in sections:
@@ -63,7 +104,10 @@ def build_html(sections, today):
         for s in section["stories"]:
             headline  = s.get("headline", "Untitled")
             url       = s.get("url", "")
-            hl_link   = f'<a href="{url}" style="color:#1a1a1a;text-decoration:underline">{headline}</a>' if url else headline
+            hl_link   = (
+                f'<a href="{url}" style="color:#1a1a1a;text-decoration:underline">{headline}</a>'
+                if url else headline
+            )
             date_part = f" · {s['date']}" if s.get("date") else ""
             cards += story_card.format(
                 headline_link=hl_link,
@@ -71,48 +115,45 @@ def build_html(sections, today):
                 date_part=date_part,
                 summary=s.get("summary", ""),
             )
-        body_parts.append(f"""
-        <div style="margin-bottom:28px">
-          <h2 style="font-size:16px;font-weight:700;padding-bottom:5px;
-                     border-bottom:1px solid #ddd;margin-bottom:12px">
-            {section['icon']} {section['label']}
-          </h2>
-          {cards}
-        </div>""")
+        body_parts.append(
+            f'<div style="margin-bottom:28px">'
+            f'<h2 style="font-size:16px;font-weight:700;padding-bottom:5px;'
+            f'border-bottom:1px solid #ddd;margin-bottom:12px">'
+            f'{section["icon"]} {section["label"]}</h2>'
+            f"{cards}</div>"
+        )
 
-    return f"""<!DOCTYPE html>
-<html><body style="font-family:Georgia,serif;max-width:680px;margin:0 auto;
-                   padding:24px;color:#1a1a1a;background:#fff">
-  <h1 style="font-size:22px;font-weight:700;border-bottom:2px solid #222;
-             padding-bottom:12px;margin-bottom:20px">
-    🧪 PFAS News Digest — {today}
-  </h1>
-  {"".join(body_parts)}
-  <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
-  <p style="font-size:11px;color:#999;margin:0">
-    Generated automatically by PFAS News Digest Agent · {today}
-  </p>
-</body></html>"""
+    return (
+        "<!DOCTYPE html><html><body style=\"font-family:Georgia,serif;max-width:680px;"
+        "margin:0 auto;padding:24px;color:#1a1a1a;background:#fff\">"
+        f"<h1 style=\"font-size:22px;font-weight:700;border-bottom:2px solid #222;"
+        f"padding-bottom:12px;margin-bottom:20px\">🧪 PFAS News Digest — {today}</h1>"
+        + "".join(body_parts)
+        + "<hr style=\"border:none;border-top:1px solid #ddd;margin:24px 0\">"
+        f"<p style=\"font-size:11px;color:#999;margin:0\">"
+        f"Generated automatically by PFAS News Digest Agent · {today}</p>"
+        "</body></html>"
+    )
 
 # ── Send via SendGrid ─────────────────────────────────────────────────────────
 def send_email(subject, html_body):
-    response = requests.post(
+    resp = requests.post(
         "https://api.sendgrid.com/v3/mail/send",
         headers={
             "Authorization": f"Bearer {SENDGRID_API_KEY}",
-            "Content-Type": "application/json",
+            "Content-Type":  "application/json",
         },
         json={
             "personalizations": [{"to": [{"email": TO_EMAIL}]}],
-            "from": {"email": FROM_EMAIL, "name": "PFAS News Digest"},
+            "from":    {"email": FROM_EMAIL, "name": "PFAS News Digest"},
             "subject": subject,
             "content": [{"type": "text/html", "value": html_body}],
         },
     )
-    if response.status_code == 202:
+    if resp.status_code == 202:
         print(f"  ✓ Email sent to {TO_EMAIL}")
     else:
-        raise RuntimeError(f"SendGrid error {response.status_code}: {response.text}")
+        raise RuntimeError(f"SendGrid error {resp.status_code}: {resp.text}")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
@@ -120,26 +161,23 @@ def main():
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     print(f"PFAS Digest Agent starting — {today}")
-    print(f"Topics: {len(TOPICS)}  |  Stories per topic: {MAX_STORIES}")
+    print(f"Topics: {len(TOPICS)}  |  Stories per topic: {MAX_STORIES}\n")
 
     sections = []
     for topic in TOPICS:
         stories = fetch_stories(client, topic)
         if stories:
-            print(f"  ✓ {len(stories)} stories for '{topic['label']}'")
             sections.append({**topic, "stories": stories})
         else:
-            print(f"  ⚠ No stories found for '{topic['label']}'")
+            print(f"  ✗ Skipping '{topic['label']}' — no stories retrieved")
 
     if not sections:
-        raise RuntimeError("No content gathered — aborting send.")
+        raise RuntimeError("No content gathered across any topic — aborting send.")
 
+    print(f"\nDigest complete — {len(sections)}/{len(TOPICS)} topics with content")
     html = build_html(sections, today)
-    subj = f"PFAS News Digest — {today}"
-    send_email(subj, html)
+    send_email(f"PFAS News Digest — {today}", html)
     print("Done ✓")
 
 if __name__ == "__main__":
     main()
-
-
