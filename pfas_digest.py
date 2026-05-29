@@ -12,18 +12,18 @@ TO_EMAIL          = os.environ.get("TO_EMAIL",   "andrew@remotevelocity.com")
 MAX_STORIES       = int(os.environ.get("MAX_STORIES", "3"))
 
 TOPICS = [
-    {"label": "Regulation & EPA",   "icon": "🏛️", "query": "PFAS regulation EPA policy 2026"},
-    {"label": "Water Contamination","icon": "💧", "query": "PFAS water contamination drinking water 2026"},
-    {"label": "Health Research",    "icon": "🔬", "query": "PFAS health effects research study 2026"},
-    {"label": "Litigation",         "icon": "⚖️", "query": "PFAS lawsuit litigation settlement 2026"},
-    {"label": "Remediation Tech",   "icon": "♻️", "query": "PFAS cleanup remediation technology 2026"},
+    {"label": "Regulation & EPA",    "icon": "🏛️", "query": "PFAS regulation EPA policy 2026"},
+    {"label": "Water Contamination", "icon": "💧",  "query": "PFAS water contamination drinking water 2026"},
+    {"label": "Health Research",     "icon": "🔬",  "query": "PFAS health effects research study 2026"},
+    {"label": "Litigation",          "icon": "⚖️",  "query": "PFAS lawsuit litigation settlement 2026"},
+    {"label": "Remediation Tech",    "icon": "♻️",  "query": "PFAS cleanup remediation technology 2026"},
 ]
 
 # ── Fetch stories for one topic ───────────────────────────────────────────────
 def fetch_stories(client, topic):
     print(f"  Searching: {topic['label']}…")
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=1500,
         system=(
             "You are a news research assistant. Use the web_search tool to find recent, "
@@ -35,7 +35,7 @@ def fetch_stories(client, topic):
             "role": "user",
             "content": f"Find the {MAX_STORIES} most recent news stories about: {topic['query']}"
         }],
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
+        tools=[{"type": "web_search_20260209", "name": "web_search"}],
     )
 
     for block in response.content:
@@ -51,9 +51,7 @@ def fetch_stories(client, topic):
 def build_html(sections, today):
     story_card = """
     <div style="margin-bottom:12px;padding:12px;background:#f8f8f6;border-left:3px solid #444;border-radius:2px">
-      <strong style="font-size:14px;display:block">
-        {headline_link}
-      </strong>
+      <strong style="font-size:14px;display:block">{headline_link}</strong>
       <span style="font-size:11px;color:#888">{source}{date_part}</span>
       <p style="font-size:13px;color:#444;margin:6px 0 0;line-height:1.55">{summary}</p>
     </div>"""
@@ -62,9 +60,9 @@ def build_html(sections, today):
     for section in sections:
         cards = ""
         for s in section["stories"]:
-            headline = s.get("headline", "Untitled")
-            url      = s.get("url", "")
-            hl_link  = f'<a href="{url}" style="color:#1a1a1a;text-decoration:underline">{headline}</a>' if url else headline
+            headline  = s.get("headline", "Untitled")
+            url       = s.get("url", "")
+            hl_link   = f'<a href="{url}" style="color:#1a1a1a;text-decoration:underline">{headline}</a>' if url else headline
             date_part = f" · {s['date']}" if s.get("date") else ""
             cards += story_card.format(
                 headline_link=hl_link,
@@ -127,7 +125,7 @@ def main():
     for topic in TOPICS:
         stories = fetch_stories(client, topic)
         if stories:
-            print(f"  ✓ {len(stories)} stories found for '{topic['label']}'")
+            print(f"  ✓ {len(stories)} stories for '{topic['label']}'")
             sections.append({**topic, "stories": stories})
         else:
             print(f"  ⚠ No stories found for '{topic['label']}'")
@@ -135,10 +133,12 @@ def main():
     if not sections:
         raise RuntimeError("No content gathered — aborting send.")
 
-    html  = build_html(sections, today)
-    subj  = f"PFAS News Digest — {today}"
+    html = build_html(sections, today)
+    subj = f"PFAS News Digest — {today}"
     send_email(subj, html)
     print("Done ✓")
 
 if __name__ == "__main__":
     main()
+
+
