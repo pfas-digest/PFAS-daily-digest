@@ -17,6 +17,7 @@ TOPICS = [
     {"label": "Health Research",     "icon": "🔬",  "query": "PFAS health effects research study 2026"},
     {"label": "Litigation",          "icon": "⚖️",  "query": "PFAS lawsuit litigation settlement 2026"},
     {"label": "Remediation Tech",    "icon": "♻️",  "query": "PFAS cleanup remediation technology 2026"},
+    {"label": "Montana news",    "icon": "M",  "query": "PFAS articles news regulations Montana 2026"},
 ]
 
 # ── Fetch stories for one topic ───────────────────────────────────────────────
